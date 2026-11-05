@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>말자람 연습장</title>
+<style>
+:root{--bg:#F0F3F4;--surface:#fff;--fg:#172326;--muted:#566569;--line:#CCD6D9;--accent:#1F6474;--accent-fg:#fff;--warn:#A8721A;--danger:#B03E2E}
+@media (prefers-color-scheme:dark){:root{--bg:#111819;--surface:#192224;--fg:#E2EBED;--muted:#9BAAAE;--line:#2F3C3F;--accent:#6CC0D2;--accent-fg:#0D1617;--warn:#E2BC68;--danger:#EE7A68;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;padding:24px 16px}
+main{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+h1{margin:0;font-size:1.7rem}h2{margin:0;font-size:1.05rem}p{margin:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.notice{border:1px solid var(--warn);border-radius:6px;padding:9px 12px;font-size:.9rem}
+.muted{color:var(--muted);font-size:.88rem}
+label{display:flex;flex-direction:column;gap:4px;font-size:.86rem;color:var(--muted)}
+input,textarea{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;width:100%}
+button{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:6px;padding:7px 13px;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg);align-self:flex-start}
+button.danger{color:var(--danger);font-size:.84rem;padding:3px 9px}
+button:disabled{opacity:.55;cursor:default}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+article{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:4px}
+.body{white-space:pre-wrap;overflow-wrap:anywhere}
+#msg{min-height:1.4em;font-size:.9rem}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>말자람 연습장</h1>
+  <div class="notice">연습용 앱입니다. 실제 학생 이름이나 발화 말고 가상 데이터만 넣어 주세요.</div>
+  <p id="msg" role="status"></p>
+
+  <section class="panel" id="setup" hidden>
+    <h2>연결 설정이 필요해요</h2>
+    <p>config.js에 Supabase의 Project URL과 publishable 키를 넣어 주세요.</p>
+  </section>
+
+  <form class="panel" id="login" hidden>
+    <h2>로그인</h2>
+    <label>이메일<input id="email" type="email" autocomplete="username" required></label>
+    <label>비밀번호<input id="password" type="password" autocomplete="current-password" required></label>
+    <button class="primary" type="submit">로그인</button>
+  </form>
+
+  <div id="app" hidden style="display:flex;flex-direction:column;gap:14px">
+    <div class="row"><span class="muted" id="who"></span><button id="logout" type="button">로그아웃</button></div>
+    <form class="panel" id="add">
+      <h2>새 전사본 저장</h2>
+      <label>논제<input id="title" required maxlength="200"></label>
+      <label>토론 날짜<input id="date" type="date"></label>
+      <label>전사 내용<textarea id="body" rows="6" required></textarea></label>
+      <button class="primary" type="submit">저장</button>
+    </form>
+    <section class="panel"><h2>저장한 전사본 <span class="muted" id="count"></span></h2><div id="list" style="display:flex;flex-direction:column;gap:10px"></div></section>
+  </div>
+</main>
+
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const say = text => { $('msg').textContent = text; };
+  const cfg = window.MALJA_CONFIG || {};
+  if (!/^https:\/\//.test(cfg.supabaseUrl || '') || !cfg.supabaseKey || cfg.supabaseKey.startsWith('여기에')) { $('setup').hidden = false; return; }
+  if (!window.supabase) { say('Supabase 연결 도구를 불러오지 못했어요. 새로고침해 주세요.'); return; }
+  const db = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
+  const TABLE = 'practice_transcripts';
+
+  async function load(){
+    const { data, error } = await db.from(TABLE).select('id,title,debate_date,body,created_at').order('created_at', { ascending:false });
+    if (error) { say('목록을 불러오지 못했어요: ' + error.message); return; }
+    $('count').textContent = data.length + '건';
+    $('list').replaceChildren(...(data.length ? data.map(row) : [Object.assign(document.createElement('p'), { className:'muted', textContent:'아직 저장한 전사본이 없어요.' })]));
+  }
+  function row(r){
+    const a = document.createElement('article');
+    const top = document.createElement('div'); top.className = 'row';
+    const t = document.createElement('b'); t.textContent = r.title;
+    const del = document.createElement('button'); del.type = 'button'; del.className = 'danger'; del.textContent = '삭제';
+    del.onclick = async () => {
+      if (del.dataset.sure !== '1') { del.dataset.sure = '1'; del.textContent = '한 번 더 누르면 삭제'; return; }
+      const { error } = await db.from(TABLE).delete().eq('id', r.id);
+      if (error) { say('삭제하지 못했어요: ' + error.message); return; }
+      say('삭제했어요.'); load();
+    };
+    top.append(t, del);
+    const d = document.createElement('span'); d.className = 'muted'; d.textContent = r.debate_date || '날짜 없음';
+    const b = document.createElement('div'); b.className = 'body'; b.textContent = r.body;
+    a.append(top, d, b);
+    return a;
+  }
+  function show(session){
+    $('login').hidden = !!session; $('app').hidden = !session;
+    if (session) { $('who').textContent = session.user.email + ' 로그인 중'; load(); }
+  }
+  $('login').addEventListener('submit', async e => {
+    e.preventDefault(); say('로그인하는 중이에요.');
+    const { error } = await db.auth.signInWithPassword({ email:$('email').value.trim(), password:$('password').value });
+    if (error) say('로그인하지 못했어요. 이메일과 비밀번호를 확인해 주세요.'); else { say(''); $('password').value = ''; }
+  });
+  $('logout').addEventListener('click', () => db.auth.signOut());
+  $('add').addEventListener('submit', async e => {
+    e.preventDefault(); const btn = e.submitter; btn.disabled = true;
+    const { error } = await db.from(TABLE).insert({ title:$('title').value.trim(), debate_date:$('date').value || null, body:$('body').value });
+    btn.disabled = false;
+    if (error) { say('저장하지 못했어요: ' + error.message); return; }
+    $('add').reset(); say('저장했어요. 새로고침해도 남아 있는지 확인해 보세요.'); load();
+  });
+  db.auth.onAuthStateChange((_ev, session) => setTimeout(() => show(session), 0));
+})();
+</script>
+</body>
+</html>
